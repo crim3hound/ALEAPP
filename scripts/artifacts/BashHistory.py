@@ -1,28 +1,31 @@
-import codecs
-import csv
+__artifacts_v2__ = {
+    "bashHistory": {
+        "name": "Bash History",
+        "description": "Parses the bash history entries",
+        "author": "@stark4n6",
+        "creation_date": "2020-10-11",
+        "last_update_date": "2025-08-09",
+        "requirements": "none",
+        "category": "Bash History",
+        "notes": "",
+        "paths": ('*/.bash_history'),
+        "output_types": ["html", "lava", "tsv"],
+        "artifact_icon": "terminal",
+    }
+}
 
-from scripts.artifact_report import ArtifactHtmlReport
-from scripts.ilapfuncs import logfunc, tsv, is_platform_windows
+from scripts.ilapfuncs import artifact_processor
 
-def get_BashHistory(files_found, report_folder, seeker, wrap_text):
+@artifact_processor
+def bashHistory(context):
+    files_found = context.get_files_found()
     data_list = []
     file_found = str(files_found[0])
     counter = 1
-    with codecs.open(file_found, 'r', 'utf-8-sig') as csvfile:
+    with open(file_found, 'r', encoding='utf-8-sig') as csvfile:
         for row in csvfile:
             data_list.append((counter, row))
             counter += 1
-            
-    if len(data_list) > 0:
-        report = ArtifactHtmlReport('Bash History')
-        report.start_artifact_report(report_folder, f'Bash History')
-        report.add_script()
-        data_headers = ('Order', 'Command')
-        report.write_artifact_data_table(data_headers, data_list, file_found)
-        report.end_artifact_report()
-        
-        tsvname = f'Bash History'
-        tsv(report_folder, data_headers, data_list, tsvname)
-        
-    else:
-        logfunc(f'No Bash History file available')
+
+    data_headers = ('Entry Order', 'Command')
+    return data_headers, data_list, file_found    

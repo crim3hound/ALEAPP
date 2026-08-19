@@ -1,0 +1,233 @@
+__artifacts_v2__ = {
+    "airtagAlerts": {
+        "name": "Android Airtag Alerts",
+        "description": "Parses unknown-tracker (AirTag) alerts (creation and update timestamps, MAC address, device type and alert status) from the Google Play services personalsafety database.",
+        "author": "@AlexisBrignoni",
+        "creation_date": "2023-08-18",
+        "last_update_date": "2025-03-16",
+        "requirements": "none",
+        "category": "Airtag Detection",
+        "notes": "",
+        "paths": '*/com.google.android.gms/databases/personalsafety_db*',
+        "output_types": "standard",
+        "artifact_icon": "bell-ringing",
+        "sample_data": {
+            "anne_a15": "Android 15 | com.google.android.gms | 0 rows",
+            "hc_pixel8pro_a16": "Android 16 | com.google.android.gms vc 253830035 | 0 rows",
+            "kevin_pocox7_a15": "Android 15 | com.google.android.gms | 4 rows",
+            "pixel7a_a14": "Android 14 | com.google.android.gms vc 242632038 | 2 rows",
+            "samsunga53_a14": "Android 14 | com.google.android.gms | 0 rows",
+            "samsungs20_a13": "Android 13 | com.google.android.gms | 0 rows",
+            "sharon_a14": "Android 14 | com.google.android.gms vc 242835039 | 0 rows",
+            "userb2_a13": "Android 13 | com.google.android.gms | 0 rows",
+        }
+    },
+    "airtagScans": {
+        "name": "Android Airtag Scans",
+        "description": "Parses unknown-tracker (AirTag) scan records (timestamps, MAC address, state, RSSI and location) from the Google Play services personalsafety database.",
+        "author": "@AlexisBrignoni",
+        "creation_date": "2023-08-18",
+        "last_update_date": "2025-03-16",
+        "requirements": "none",
+        "category": "Airtag Detection",
+        "notes": "",
+        "paths": '*/com.google.android.gms/databases/personalsafety_db*',
+        "output_types": "all",
+        "artifact_icon": "radar",
+        "sample_data": {
+            "anne_a15": "Android 15 | com.google.android.gms | 0 rows",
+            "hc_pixel8pro_a16": "Android 16 | com.google.android.gms vc 253830035 | 0 rows",
+            "kevin_pocox7_a15": "Android 15 | com.google.android.gms | 43 rows",
+            "pixel7a_a14": "Android 14 | com.google.android.gms vc 242632038 | 39 rows",
+            "samsunga53_a14": "Android 14 | com.google.android.gms | 0 rows",
+            "samsungs20_a13": "Android 13 | com.google.android.gms | 0 rows",
+            "sharon_a14": "Android 14 | com.google.android.gms vc 242835039 | 4 rows",
+            "userb2_a13": "Android 13 | com.google.android.gms | 0 rows",
+        }
+    },
+    "airtagLastScan": {
+        "name": "Android Airtag Last Scan",
+        "description": "Parses the last unknown-tracker (AirTag) scan time from the personalsafety_info protobuf file.",
+        "author": "@AlexisBrignoni",
+        "creation_date": "2023-08-18",
+        "last_update_date": "2025-03-16",
+        "requirements": "none",
+        "category": "Airtag Detection",
+        "notes": "",
+        "paths": '*/files/personalsafety/shared/personalsafety_info.pb',
+        "output_types": "standard",
+        "artifact_icon": "clock-search",
+        "sample_data": {
+            "anne_a15": "Android 15 | com.google.android.gms | 1 row",
+            "hc_pixel8pro_a16": "Android 16 | com.google.android.gms vc 253830035 | 1 row",
+            "kevin_pocox7_a15": "Android 15 | com.google.android.gms | 1 row",
+            "pixel7a_a14": "Android 14 | com.google.android.gms vc 242632038 | 1 row",
+            "sharon_a14": "Android 14 | com.google.android.gms vc 242835039 | 1 row",
+            "userb2_a13": "Android 13 | com.google.android.gms | 1 row",
+        }
+    },
+    "airtagPassiveScan": {
+        "name": "Android Airtag Passive Scan",
+        "description": "Parses the unknown-tracker (AirTag) passive-scan opt-in setting from the personalsafety_optin protobuf file.",
+        "author": "@AlexisBrignoni",
+        "creation_date": "2023-08-18",
+        "last_update_date": "2025-03-16",
+        "requirements": "none",
+        "category": "Airtag Detection",
+        "notes": "",
+        "paths": '*/files/personalsafety/shared/personalsafety_optin.pb',
+        "output_types": "standard",
+        "artifact_icon": "radar-2"
+    }
+}
+
+
+from scripts.ilapfuncs import decode_protobuf
+from scripts.ilapfuncs import artifact_processor, \
+    get_file_path, get_sqlite_db_records, get_binary_file_content, \
+    convert_unix_ts_to_utc, does_column_exist_in_db
+
+
+@artifact_processor
+def airtagAlerts(context):
+    files_found = context.get_files_found()
+    source_path = get_file_path(files_found, "personalsafety_db")
+    data_list = []
+
+    # older GmsCore personalsafety_db schemas do not carry these two columns
+    device_type_col = 'deviceType' if does_column_exist_in_db(
+        source_path, 'DeviceData', 'deviceType') else "NULL AS deviceType"
+    optional_data_col = 'optionalDeviceData' if does_column_exist_in_db(
+        source_path, 'DeviceData', 'optionalDeviceData') else "NULL AS optionalDeviceData"
+
+    query = f'''
+    SELECT
+        creationTimestampMillis,
+        lastUpdatedTimestampMillis,
+        macAddress,
+        {device_type_col},
+        {optional_data_col},
+        alertLifecycleId,
+        alertStatus
+    FROM DeviceData
+    '''
+
+    data_headers = (
+        ('Creation Timestamp', 'datetime'), 
+        ('Last Updated Timestamp', 'datetime'), 
+        'MAC Address', 
+        'Device Type', 
+        'Optional Device Data', 
+        'Alert Life Cycle ID', 
+        'Alert Status')
+
+    db_records = get_sqlite_db_records(source_path, query)
+
+    for record in db_records:
+        creation_timestamp = convert_unix_ts_to_utc(record[0])
+        last_updated_timestamp = convert_unix_ts_to_utc(record[1])
+        data_list.append((
+            creation_timestamp, 
+            last_updated_timestamp, 
+            record[2], record[3], record[4], record[5], record[6]
+        ))
+    
+    return data_headers, data_list, source_path
+
+        
+@artifact_processor
+def airtagScans(context):
+    files_found = context.get_files_found()
+    source_path = get_file_path(files_found, "personalsafety_db")
+    data_list = []
+    
+    query = '''
+    SELECT 
+        creationTimestampMillis,
+        lastUpdatedTimestampMillis,
+        macAddress,
+        state,
+        blescan,
+        locationScan 
+    FROM Scan
+    '''
+
+    data_headers = (
+        ('Creation Timestamp', 'datetime'), 
+        ('Last Updated Timestamp', 'datetime'), 
+        'MAC Address', 
+        'State', 
+        'Possible RSSI', 
+        'Latitude', 
+        'Longitude')
+
+    db_records = get_sqlite_db_records(source_path, query)
+
+    for record in db_records:
+        creation_timestamp, last_updated_timestamp, mac_address, \
+            state, blescan, location_scan = record
+        creation_timestamp = convert_unix_ts_to_utc(record[0])
+        last_updated_timestamp = convert_unix_ts_to_utc(record[1])
+
+        blescan_proto = {}
+        if blescan:
+            blescan_proto, _ = decode_protobuf(blescan)
+            blescan_proto = blescan_proto or {}
+        posrssi = blescan_proto.get('2', '')
+
+        # a scan row without a location fix carries no lat/long fields
+        location_scan_proto = {}
+        if location_scan:
+            location_scan_proto, _ = decode_protobuf(location_scan)
+            location_scan_proto = location_scan_proto or {}
+        lat_raw = location_scan_proto.get('4')
+        lon_raw = location_scan_proto.get('5')
+        latitude = lat_raw / 1e7 if isinstance(lat_raw, (int, float)) else ''
+        longitude = lon_raw / 1e7 if isinstance(lon_raw, (int, float)) else ''
+
+        data_list.append((
+            creation_timestamp, last_updated_timestamp, mac_address,
+            state, posrssi, latitude, longitude))
+
+    return data_headers, data_list, source_path
+
+        
+@artifact_processor
+def airtagLastScan(context):
+    files_found = context.get_files_found()
+    source_path = get_file_path(files_found, "personalsafety_info.pb")
+    data_list = []
+    
+    proto_data = get_binary_file_content(source_path)
+
+    lastscan, _ = decode_protobuf(proto_data)
+    lastscan = (lastscan['1'])
+    lastscan = convert_unix_ts_to_utc(lastscan)
+    data_list.append((lastscan, ))
+
+    data_headers = (('Timestamp', 'datetime'),)
+
+    return data_headers, data_list, source_path
+
+
+@artifact_processor
+def airtagPassiveScan(context):
+    files_found = context.get_files_found()
+    source_path = get_file_path(files_found, "personalsafety_optin.pb")
+    data_list = []
+    
+    proto_data = get_binary_file_content(source_path)
+
+    pass_scan, _ = decode_protobuf(proto_data)
+    pass_scan = (pass_scan['1'])
+    
+    if pass_scan == 1:
+        pass_scan = 'On'
+    elif pass_scan == 2:
+        pass_scan = 'Off'
+
+    data_list.append((pass_scan, ))
+
+    data_headers = ('Passive Scan', )
+
+    return data_headers, data_list, source_path

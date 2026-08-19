@@ -1,254 +1,217 @@
+"""
+Generates the HTML report output, including per-artifact pages,
+sidebar navigation, and the index summary page with case information and credits.
+"""
+
 import html
 import os
-import pathlib
+from pathlib import Path
 import shutil
-import sqlite3
-import sys
 
 from collections import OrderedDict
-from scripts.html_parts import *
+from scripts.html_parts import nav_bar_script, nav_bar_script_footer, \
+    page_header, page_footer, body_start, body_end, body_sidebar_setup, body_sidebar_trailer, \
+    body_main_header, body_main_data_title, body_main_trailer, thank_you_note, credits_block, \
+    individual_contributor, blog_icon, twitter_icon, github_icon, blank_icon, tabs_code, \
+    body_sidebar_dynamic_data_placeholder
 from scripts.ilapfuncs import logfunc
-from scripts.version_info import aleapp_version, aleapp_contributors
+from scripts.version_info import leapp_version, aleapp_contributors
 
-def get_icon_name(category, artifact):
-    ''' Returns the icon name from the feathericons collection. To add an icon type for 
-        an artifact, select one of the types from ones listed @ feathericons.com
-        If no icon is available, the alert triangle is returned as default icon.
-    '''
-    category = category.upper()
-    artifact = artifact.upper()
-    icon = 'alert-triangle' # default (if not defined!)
+from leapp_functions.data_sources.text_files import get_txt_file_content
+from leapp_functions.data_sources.json_files import get_json_file_content
 
-    if category.find('ACCOUNT') >= 0:
-        if artifact.find('AUTH') >= 0:  icon = 'key'
-        else:                           icon = 'user'
-    elif category == 'ADB HOSTS':       icon = 'terminal'
-    elif category == 'APP INTERACTION': icon = 'bar-chart-2'
-    elif category == 'BASH HISTORY':    icon = 'terminal'
-    elif category == 'DEVICE HEALTH SERVICES':         
-        if artifact.find('BLUETOOTH') >=0:  icon = 'bluetooth'
-        elif artifact.find('BATTERY') >=0:  icon = 'battery-charging'
-        else:                           icon = 'bar-chart-2'
-    elif category == 'BLUETOOTH CONNECTIONS':       icon = 'bluetooth'
-    elif category == 'CAST':            icon = 'cast'
-    elif category == 'FITBIT':            icon = 'watch'
-    elif category == 'CALL LOGS':       icon = 'phone'
-    elif category == 'CHATS':           icon = 'message-circle'
-    elif category == 'CHROMIUM':          
-        if artifact.find('SEARCH TERMS') >= 0:      icon = 'search'
-        elif artifact.find('DOWNLOADS') >= 0:       icon = 'download'
-        elif artifact.find('BOOKMARKS') >= 0:       icon = 'bookmark'
-        elif artifact.find('LOGIN') >= 0:           icon = 'log-in'
-        elif artifact.find('MEDIA HISTORY') >= 0:   icon = 'video'
-        elif artifact.find('NETWORK ACTION PREDICTOR') >=0:    icon = 'type'
-        elif artifact.find('TOP SITES') >= 0:       icon = 'list'
-        elif artifact.find('OFFLINE PAGES') >= 0:   icon = 'cloud-off'
-        elif artifact.find('AUTOFILL') >= 0:        icon = 'edit-3'
-        else:                                       icon = 'chrome'
-    elif category == 'DEVICE INFO':     
-        if artifact == 'BUILD INFO':                icon = 'terminal'
-        elif artifact == 'PARTNER SETTINGS':        icon = 'settings'
-        elif artifact.find('SETTINGS_SECURE_') >= 0: icon = 'settings'
-        else:                                       icon = 'info'
-    elif category == 'ETC HOSTS':       icon = 'globe'
-    elif category == 'EMULATED STORAGE METADATA':     icon = 'database'
-    elif category == 'FACEBOOK MESSENGER':      icon = 'facebook'
-    elif category == 'GOOGLE KEEP':     icon = 'list'
-    elif category == 'GBOARD KEYBOARD': icon = 'edit-3'
-    elif category == 'GOOGLE DRIVE':     icon = 'file'
-    elif category == 'GOOGLE NOW & QUICKSEARCH': icon = 'search'
-    elif category == 'GOOGLE PHOTOS':
-        if artifact.find('LOCAL TRASH') >=0:            icon = 'trash-2'
-        elif artifact.find('BACKED UP FOLDER') >= 0:    icon = 'refresh-cw'
-        else:                                           icon = 'image'
-    elif category == 'GOOGLE PLAY':     
-        if artifact == 'GOOGLE PLAY SEARCHES':      icon = 'search'
-        else:                                       icon = 'play'
-    elif category == 'INSTALLED APPS':  icon = 'package'
-    elif category == 'MEDIA METADATA':  icon = 'file-plus'
-    elif category == 'NOW PLAYING':           icon = 'music'
-    elif category == 'RCS CHATS':       icon = 'message-circle'
-    elif category == 'RECENT ACTIVITY': icon = 'activity'
-    elif category == 'SAMSUNG_CMH':     icon = 'disc'
-    elif category == 'SCRIPT LOGS':     icon = 'archive'
-    elif category == 'SKOUT':
-        if artifact == 'SKOUT MESSAGES':  icon = 'message-circle'
-        if artifact == 'SKOUT USERS':  icon = 'users'
-    elif category == 'TEAMS':
-        if artifact == 'TEAMS MESSAGES':  icon = 'message-circle'
-        elif artifact == 'TEAMS USERS':  icon = 'users'
-        elif artifact == 'TEAMS CALL LOG':  icon = 'phone'
-        elif artifact == 'TEAMS ACTIVITY FEED':  icon = 'at-sign'
-        elif artifact == 'TEAMS FILE INFO':  icon = 'file'
-        else:                           icon = 'file-text'
-    elif category == 'VIBER':
-        if artifact == 'VIBER - CONTACTS':  icon = 'user'
-        if artifact == 'VIBER - MESSAGES':  icon = 'message-square'
-        if artifact == 'VIBER - CALL LOGS':  icon = 'phone'
-    elif category == 'SMS & MMS':       icon = 'message-square'
-    elif category == 'SQLITE JOURNALING': icon = 'book-open'
-    elif category == 'USAGE STATS':     icon = 'bar-chart-2'
-    elif category == 'USER DICTIONARY': icon = 'book'
-    elif category == 'WELLBEING' or category == 'WELLBEING ACCOUNT': 
-        if artifact == 'ACCOUNT DATA':  icon = 'user'
-        else:                           icon = 'layers'
-    elif category == 'WIFI PROFILES':  icon = 'wifi'
-    elif category == 'PERMISSIONS':  icon = 'check'
-    elif category == 'APP ROLES':  icon = 'tool'
-    elif category == 'LINE':
-        if artifact == 'LINE - CONTACTS':  icon = 'user'
-        if artifact == 'LINE - MESSAGES':  icon = 'message-square'
-        if artifact == 'LINE - CALL LOGS':  icon = 'phone'
-    elif category == 'IMO':
-        if artifact == 'IMO - ACCOUNT ID':  icon = 'user'
-        if artifact == 'IMO - MESSAGES':  icon = 'message-square'
-    elif category == 'TANGO':
-        if artifact == 'TANGO - MESSAGES':  icon = 'message-square'
-    elif category == 'VLC':
-        if artifact == 'VLC MEDIA LIST':  icon = 'film'
-        if artifact == 'VLC THUMBNAILS':  icon = 'image'
-    elif category == 'SKYPE':
-        if artifact == 'SKYPE - CALL LOGS':  icon = 'phone'
-        if artifact == 'SKYPE - MESSAGES':  icon = 'message-square'
-        if artifact == 'SKYPE - CONTACTS':  icon = 'user'
-    elif category == 'TEXT NOW':
-        if artifact == 'TEXT NOW - CALL LOGS':  icon = 'phone'
-        if artifact == 'TEXT NOW - MESSAGES':  icon = 'message-square'
-        if artifact == 'TEXT NOW - CONTACTS':  icon = 'user'
-    elif category == 'TIKTOK':
-        if artifact == 'TIKTOK - MESSAGES':  icon = 'message-square'
-        if artifact == 'TIKTOK - CONTACTS':  icon = 'user'
-    elif category == 'WHATSAPP':
-        if artifact == 'WHATSAPP - MESSAGES':  icon = 'messages-square'
-        if artifact == 'WHATSAPP - CONTACTS':  icon = 'user'
-        else:                           icon = 'phone'
-    elif category == 'CONTACTS':  icon = 'user'
-    return icon
-    
-    '''
-    '''
-def generate_report(reportfolderbase, time_in_secs, time_HMS, extraction_type, image_input_path):
+
+def get_tabler_icon_names():
+    """Returns a set of available tabler icon names by parsing the scripts/_elements/tabler-icons.css file."""
+    tabler_icons_css_content = get_txt_file_content(
+        Path(__file__).resolve().parent.joinpath("_elements", "tabler-icons.css"), line_by_line=True)
+    return set(line[4:line.find(":")] for line in tabler_icons_css_content if line.startswith(".ti-"))
+
+
+def generate_report(reportfolderbase, time_in_secs, time_hms, extraction_type, image_input_path,
+                    casedata, profile_filename, icons):
+    """
+    Builds the full HTML report by assembling sidebar navigation from .temphtml artifact files,
+    writing final .html pages, and generating the index.html summary page.
+    """
+
+    tabler_icon_names = get_tabler_icon_names()
+    tabler_icon_correction = get_json_file_content(
+        Path(__file__).resolve().parent.joinpath("data", "tabler_icon_correction.json"))
+    feather_to_tabler_icon_names = get_json_file_content(
+        Path(__file__).resolve().parent.joinpath("data", "feather_to_tabler_icon_names.json"))
 
     control = None
     side_heading = \
-    """<h6 class="sidebar-heading justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
-        {0}
-    </h6>
-    """
+        """
+        <h6 class="sidebar-heading justify-content-between align-items-center px-3 mt-4 mb-1">
+            {0}
+        </h6>
+        """
     list_item = \
-    """
-    <li class="nav-item">
-        <a class="nav-link {0}" href="{1}">
-            <span data-feather="{2}"></span> {3}
-        </a>
-    </li>
-    """
+        """
+        <li class="nav-item">
+            <a class="nav-link {0}" href="{1}">
+                <span class="ti ti-{2}"></span> {3}
+            </a>
+        </li>
+        """
     # Populate the sidebar dynamic data (depends on data/files generated by parsers)
     # Start with the 'saved reports' (home) page link and then append elements
-    nav_list_data = side_heading.format('Saved Reports') + list_item.format('', 'index.html', 'home', 'Report Home')
+    nav_list_data = side_heading.format('Saved Reports') + \
+        list_item.format('', 'index.html', 'home', 'Report Home')
     # Get all files
-    side_list = OrderedDict() # { Category1 : [path1, path2, ..], Cat2:[..] } Dictionary containing paths as values, key=category
+    # { Category1 : [path1, path2, ..], Cat2:[..] } Dictionary containing paths as values, key=category
+    side_list = OrderedDict()
 
-    for root, dirs, files in sorted(os.walk(reportfolderbase)):
+    for root, _, files in sorted(os.walk(reportfolderbase)):
         files = sorted(files)
         for file in files:
-            if file.endswith(".temphtml"):    
-                fullpath = (os.path.join(root, file))
-                head, tail = os.path.split(fullpath)
-                p = pathlib.Path(fullpath)
-                SectionHeader = (p.parts[-2])
-                if SectionHeader == '_elements':
+            if file.startswith('._'):
+                continue
+            if file.endswith(".temphtml"):
+                fullpath = os.path.join(root, file)
+                _, tail = os.path.split(fullpath)
+                filename = tail.replace(".temphtml", "")
+                p = Path(fullpath)
+                section_header = p.parts[-2]
+                if section_header == '_elements':
                     pass
                 else:
-                    if control == SectionHeader:
-                        side_list[SectionHeader].append(fullpath)
-                        icon = get_icon_name(SectionHeader, tail.replace(".temphtml", ""))
-                        nav_list_data += list_item.format('', tail.replace(".temphtml", ".html"), icon, tail.replace(".temphtml", ""))
+                    if control != section_header:
+                        control = section_header
+                        side_list[section_header] = []
+                        nav_list_data += side_heading.format(section_header)
+                    side_list[section_header].append(fullpath)
+                    icon_name = icons.get(section_header, {}).get(filename, "")
+                    if not icon_name:
+                        # Some modules write reports under runtime names that differ from the
+                        # artifact metadata name (e.g. chrome.py's "Chrome - Web History" vs
+                        # "Web History", sms.py's "SMS & iMessage - ..." vs "SMS"). Fall back
+                        # to the longest registered artifact name the report name starts or
+                        # ends with, so those reports keep their artifact's icon.
+                        matches = [(len(art_name), art_icon)
+                                   for art_name, art_icon in icons.get(section_header, {}).items()
+                                   if filename.endswith(art_name) or filename.startswith(art_name)]
+                        if matches:
+                            icon_name = max(matches)[1]
+                    if icon_name in tabler_icon_names:
+                        if icon_name in tabler_icon_correction:
+                            icon_name = tabler_icon_correction[icon_name]
+                        icon = icon_name
+                    elif icon_name in feather_to_tabler_icon_names:
+                        icon = feather_to_tabler_icon_names[icon_name]
                     else:
-                        control = SectionHeader
-                        side_list[SectionHeader] = []
-                        side_list[SectionHeader].append(fullpath)
-                        nav_list_data += side_heading.format(SectionHeader)
-                        icon = get_icon_name(SectionHeader, tail.replace(".temphtml", ""))
-                        nav_list_data += list_item.format('', tail.replace(".temphtml", ".html"), icon, tail.replace(".temphtml", ""))
+                        icon = 'alert-triangle'
+
+                    nav_list_data += list_item.format(
+                        '', tail.replace(".temphtml", ".html").replace(" ", "_"),
+                        icon, filename.replace("_", " "))
 
     # Now that we have all the file paths, start writing the files
 
-    for category, path_list in side_list.items():
+    for _, path_list in side_list.items():
         for path in path_list:
             old_filename = os.path.basename(path)
-            filename = old_filename.replace(".temphtml", ".html")
+            filename = old_filename.replace(".temphtml", ".html").replace(" ", "_")
             # search for it in nav_list_data, then mark that one as 'active' tab
             active_nav_list_data = mark_item_active(nav_list_data, filename) + nav_bar_script
-            artifact_data = get_file_content(path)
+            # Stream the (potentially very large) artifact page to its final
+            # location, injecting the sidebar navigation without loading the
+            # whole file into memory (iLEAPP issue #1746).
+            dest_path = os.path.join(reportfolderbase, '_HTML', filename)
+            stream_insert_sidebar_code(path, dest_path, active_nav_list_data)
 
-            # Now write out entire html page for artifact
-            f = open(os.path.join(reportfolderbase, filename), 'w', encoding='utf8')
-            artifact_data = insert_sidebar_code(artifact_data, active_nav_list_data, path)
-            f.write(artifact_data)
-            f.close()
-            
             # Now delete .temphtml
             os.remove(path)
             # If dir is empty, delete it
             try:
                 os.rmdir(os.path.dirname(path))
             except OSError:
-                pass # Perhaps it was not empty!
+                pass  # Perhaps it was not empty!
 
     # Create index.html's page content
-    create_index_html(reportfolderbase, time_in_secs, time_HMS, extraction_type, image_input_path, nav_list_data)
-    elements_folder = os.path.join(reportfolderbase, '_elements')
-    os.mkdir(elements_folder)
+    create_index_html(reportfolderbase, time_in_secs, time_hms, extraction_type, image_input_path,
+                      nav_list_data, casedata, profile_filename)
+    elements_folder = os.path.join(reportfolderbase, '_HTML', '_elements')
     __location__ = os.path.dirname(os.path.abspath(__file__))
-    
-    shutil.copy2(os.path.join(__location__,"logo.jpg"), elements_folder)
-    shutil.copy2(os.path.join(__location__,"dashboard.css"), elements_folder)
-    shutil.copy2(os.path.join(__location__,"feather.min.js"), elements_folder)
-    shutil.copy2(os.path.join(__location__,"dark-mode.css"), elements_folder)
-    shutil.copy2(os.path.join(__location__,"dark-mode-switch.js"), elements_folder)
-    shutil.copytree(os.path.join(__location__,"MDB-Free_4.13.0"), os.path.join(elements_folder, 'MDB-Free_4.13.0'))
+
+    def copy_no_perm(src, dst):
+        if not os.path.isdir(dst):
+            shutil.copy2(src, dst)
+        return dst
+
+    try:
+        shutil.copytree(os.path.join(__location__, "_elements"), elements_folder, copy_function=copy_no_perm)
+    except shutil.Error:
+        print("shutil reported an error. Maybe due to recursive directory copying.")
+        if os.path.exists(os.path.join(elements_folder, 'MDB-Free_4.13.0')):
+            print("_elements folder seems fine. Probably nothing to worry about")
+
 
 def get_file_content(path):
+    """Return UTF-8 text content from the file at the given path."""
     f = open(path, 'r', encoding='utf8')
     data = f.read()
     f.close()
     return data
 
-def create_index_html(reportfolderbase, time_in_secs, time_HMS, extraction_type, image_input_path, nav_list_data):
+
+def create_index_html(reportfolderbase, time_in_secs, time_hms, extraction_type, image_input_path,
+                      nav_list_data, casedata, profile_filename):
     '''Write out the index.html page to the report folder'''
+    case_list = []
+    agency_logo_mimetype = ''
+    agency_logo_b64 = ''
     content = '<br />'
     content += """
-    <div class="card bg-white" style="padding: 20px;">
-        <h2 class="card-title">Case Information</h2>
-    """ # CARD start
-    
-    case_list = [   ['Extraction location', image_input_path],
-                    ['Extraction type', extraction_type],
-                    ['Report directory', reportfolderbase],
-                    ['Processing time', f'{time_HMS} (Total {time_in_secs} seconds)']  ]
+                   <div class="card bg-white" style="padding: 20px;">
+                   <h2 class="card-title">Case Information</h2>
+               """  # CARD start
 
-    tab1_content = generate_key_val_table_without_headings('', case_list) + \
-    """         <p class="note note-primary mb-4">
-                    All dates and times are in UTC unless noted otherwise!
-                </p>
-    """
+    if len(casedata) > 0:
+        for key, value in casedata.items():
+            if 'Agency Logo' in key:
+                if key == 'Agency Logo mimetype':
+                    agency_logo_mimetype = value
+                if key == 'Agency Logo base64':
+                    agency_logo_b64 = value
+                continue
+            if value:
+                case_list.append([key, value])
+
+    if profile_filename:
+        case_list.append(['Profile loaded', profile_filename])
+
+    case_list += [
+        ['Extraction location', image_input_path],
+        ['Extraction type', extraction_type],
+        ['Report directory', reportfolderbase],
+        ['Processing time', f'{time_hms} (Total {time_in_secs} seconds)']
+    ]
+
+    tab1_content = generate_key_val_table_without_headings('', case_list, agency_logo_mimetype, agency_logo_b64) + \
+        """
+            <p class="note note-primary mb-4">
+            All dates and times are in UTC unless noted otherwise!
+            </p>
+        """
 
     # Get script run log (this will be tab2)
-    devinfo_files_path = os.path.join(reportfolderbase, 'Script Logs', 'DeviceInfo.html')
+    devinfo_files_path = os.path.join(reportfolderbase, '_HTML', '_Script_Logs', 'DeviceInfo.html')
     tab2_content = get_file_content(devinfo_files_path)
-    
+
     # Get script run log (this will be tab3)
-    script_log_path = os.path.join(reportfolderbase, 'Script Logs', 'Screen Output.html')
+    script_log_path = os.path.join(reportfolderbase, '_HTML', '_Script_Logs', 'Screen_Output.html')
     tab3_content = get_file_content(script_log_path)
-    
-    # Get processed files list (this will be tab3)
-    processed_files_path = os.path.join(reportfolderbase, 'Script Logs', 'ProcessedFilesLog.html')
+
+    # Get processed files list (this will be tab4)
+    processed_files_path = os.path.join(reportfolderbase, '_HTML', '_Script_Logs', 'ProcessedFilesLog.html')
     tab4_content = get_file_content(processed_files_path)
-    
+
     content += tabs_code.format(tab1_content, tab2_content, tab3_content, tab4_content)
-    
-    content += '</div>' # CARD end
+
+    content += '</div>'  # CARD end
 
     authors_data = generate_authors_table_code(aleapp_contributors)
     credits_code = credits_block.format(authors_data)
@@ -257,23 +220,41 @@ def create_index_html(reportfolderbase, time_in_secs, time_HMS, extraction_type,
     filename = 'index.html'
     page_title = 'ALEAPP Report'
     body_heading = 'Android Logs Events And Protobuf Parser'
-    body_description = 'ALEAPP is an open source project that aims to parse every known Android artifact for the purpose of forensic analysis.'
+    body_description = 'ALEAPP is an open source project that aims to parse every known Android artifact '\
+        'for the purpose of forensic analysis.'
     active_nav_list_data = mark_item_active(nav_list_data, filename) + nav_bar_script
 
+    html_reportfolderbase = Path(reportfolderbase).joinpath('_HTML')
+    html_reportfolderbase.mkdir(exist_ok=True)
+    with html_reportfolderbase.joinpath(filename).open('w', encoding='utf8') as f:
+        f.write(page_header.format(page_title))
+        f.write(body_start.format(f"ALEAPP {leapp_version}"))
+        f.write(body_sidebar_setup + active_nav_list_data + body_sidebar_trailer)
+        f.write(body_main_header + body_main_data_title.format(body_heading, body_description))
+        f.write(content)
+        f.write(thank_you_note)
+        f.write(credits_code)
+        f.write(body_main_trailer + body_end + nav_bar_script_footer + page_footer)
+
+    # Create Index Redirection Page
+    redirection = \
+        """
+        <html>
+            <head>
+                <meta http-equiv="refresh" content="0; url=_HTML/index.html" />
+                <title>ALEAPP Report</title>
+            </head>
+        </html>
+        """
     f = open(os.path.join(reportfolderbase, filename), 'w', encoding='utf8')
-    f.write(page_header.format(page_title))
-    f.write(body_start.format(f"ALEAPP {aleapp_version}"))
-    f.write(body_sidebar_setup + active_nav_list_data + body_sidebar_trailer)
-    f.write(body_main_header + body_main_data_title.format(body_heading, body_description))
-    f.write(content)
-    f.write(thank_you_note)
-    f.write(credits_code)
-    f.write(body_main_trailer + body_end + nav_bar_script_footer + page_footer)
+    f.write(redirection)
     f.close()
 
-def generate_authors_table_code(aleapp_contributors):
+
+def generate_authors_table_code(contributors):
+    """Reads the contributors JSON file and returns HTML markup for the authors credits table."""
     authors_data = ''
-    for author_name, blog, tweet_handle, git in aleapp_contributors:
+    for author_name, blog, tweet_handle, git in contributors:
         author_data = ''
         if blog:
             author_data += f'<a href="{blog}" target="_blank">{blog_icon}</a> &nbsp;\n'
@@ -291,46 +272,86 @@ def generate_authors_table_code(aleapp_contributors):
         authors_data += individual_contributor.format(author_name, author_data)
     return authors_data
 
-def generate_key_val_table_without_headings(title, data_list, html_escape=True, width="70%"):
+
+def generate_key_val_table_without_headings(title, data_list, agency_logo_mimetype, agency_logo_b64):
     '''Returns the html code for a key-value table (2 cols) without col names'''
     code = ''
     if title:
         code += f'<h2>{title}</h2>'
     table_header_code = \
-    """
+        """
         <div class="table-responsive">
-            <table class="table table-bordered table-hover table-sm" width={}>
+            <table class="table table-bordered table-hover table-sm" width="70%">
                 <tbody>
-    """
+        """
     table_footer_code = \
-    """
+        """
                 </tbody>
             </table>
         </div>
-    """
-    code += table_header_code.format(width)
+        """
+    code += table_header_code
 
     # Add the rows
-    if html_escape:
-        for row in data_list:
-            code += '<tr>' + ''.join( ('<td>{}</td>'.format(html.escape(str(x))) for x in row) ) + '</tr>'
-    else:
-        for row in data_list:
-            code += '<tr>' + ''.join( ('<td>{}</td>'.format(str(x)) for x in row) ) + '</tr>'
+    code += '<tr>'
+    if agency_logo_b64 and agency_logo_mimetype:
+        code += f'<td rowspan="{len(data_list) + 1}" style="text-align: center; vertical-align: middle">\
+            <img src="data:{agency_logo_mimetype};base64,{agency_logo_b64}" \
+            style="min-width: 50px; max-width:200px"></div>\
+            </td>'
+    for row in data_list:
+        code += '<tr>' + ''.join((f'<td>{html.escape(str(x))}</td>' for x in row)) + '</tr>'
 
     # Add footer
     code += table_footer_code
 
     return code
 
-def insert_sidebar_code(data, sidebar_code, filename):
-    pos = data.find(body_sidebar_dynamic_data_placeholder)
-    if pos < 0:
-        logfunc(f'Error, could not find {body_sidebar_dynamic_data_placeholder} in file {filename}')
-        return data
-    else:
-        ret = data[0 : pos] + sidebar_code + data[pos + len(body_sidebar_dynamic_data_placeholder):]
-        return ret
+
+def stream_insert_sidebar_code(src_path, dest_path, sidebar_code):
+    """Copy the artifact page from src_path to dest_path, replacing the first
+    sidebar placeholder with sidebar_code, without loading the whole file into
+    memory.
+
+    Artifact pages can grow to several GB for large extractions, so reading an
+    entire page and concatenating strings (the previous approach) could exhaust
+    memory and raise MemoryError during report generation (iLEAPP issue #1746).
+    The placeholder is written near the top of every page, so only a small head
+    buffer is retained while searching for it; the large table body that
+    follows is streamed to the destination in fixed-size chunks."""
+    placeholder = body_sidebar_dynamic_data_placeholder
+    marker_len = len(placeholder)
+    chunk_size = 1024 * 1024  # 1 MiB
+    keep = marker_len - 1  # bytes a placeholder split across a chunk could span
+    with open(src_path, 'r', encoding='utf8') as src, \
+            open(dest_path, 'w', encoding='utf8') as dst:
+        buffer = ''
+        inserted = False
+        while True:
+            chunk = src.read(chunk_size)
+            if not chunk:
+                break
+            buffer += chunk
+            pos = buffer.find(placeholder)
+            if pos >= 0:
+                dst.write(buffer[:pos])
+                dst.write(sidebar_code)
+                dst.write(buffer[pos + marker_len:])
+                buffer = ''
+                inserted = True
+                # Copy the remainder of the (large) file in bounded chunks.
+                shutil.copyfileobj(src, dst, chunk_size)
+                break
+            # Placeholder not found yet: flush everything except a small tail
+            # that could still hold a placeholder split across the boundary.
+            if len(buffer) > keep:
+                dst.write(buffer[:-keep])
+                buffer = buffer[-keep:]
+        if not inserted:
+            if buffer:
+                dst.write(buffer)
+            logfunc(f'Error, could not find {placeholder} in file {src_path}')
+
 
 def mark_item_active(data, itemname):
     '''Finds itemname in data, then marks that node as active. Return value is changed data'''
@@ -339,6 +360,5 @@ def mark_item_active(data, itemname):
         logfunc(f'Error, could not find {itemname} in {data}')
         return data
     else:
-        ret = data[0 : pos] + " active" + data[pos:]
+        ret = data[0: pos] + " active" + data[pos:]
         return ret
-    

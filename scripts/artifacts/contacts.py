@@ -1,13 +1,46 @@
+# pylint: disable=W0611,W0612,W0718
+__artifacts_v2__ = {
+    "contacts": {
+        "name": "Contacts",
+        "description": "Contacts from the device",
+        "author": "Mark McKinnon",
+        "creation_date": "2021-03-11",
+        "last_update_date": "2025-09-09",
+        "requirements": "none",
+        "category": "Contacts",
+        "notes": "",
+        "paths": ('*/com.android.providers.contacts/databases/contact*', '*/com.sec.android.provider.logsprovider/databases/logs.db*', '*/com.samsung.android.providers.contacts/databases/contact*'),
+        "output_types": ["html","tsv","lava"],
+        "artifact_icon": "users",
+        "sample_data": {
+            "anne_a15": "Android 15 | com.samsung.android.providers.contacts | 9 rows",
+            "galaxys10_a10": "Android 10 | com.samsung.android.providers.contacts | 3 rows",
+            "hc_pixel8pro_a16": "Android 16 | com.android.providers.contacts | 2 rows",
+            "kevin_pocox7_a15": "Android 15 | com.android.providers.contacts | 19 rows",
+            "pixel7a_a14": "Android 14 | com.android.providers.contacts | 16 rows",
+            "samsunga53_a14": "Android 14 | com.samsung.android.providers.contacts | 12 rows",
+            "samsungs20_a13": "Android 13 | com.samsung.android.providers.contacts | 6 rows",
+            "sharon_a14": "Android 14 | com.samsung.android.providers.contacts | 31 rows",
+            "russell_pixel6a_a13": "Android 13 | com.android.providers.contacts | 4 rows",
+            "userb2_a13": "Android 13 | com.android.providers.contacts | 0 rows",
+        },
+    }
+}
+
 import os
-import sqlite3
 import datetime
 
-from scripts.artifact_report import ArtifactHtmlReport
-from scripts.ilapfuncs import logfunc, tsv, timeline, is_platform_windows, open_sqlite_db_readonly, does_column_exist_in_db
+from scripts.ilapfuncs import artifact_processor, open_sqlite_db_readonly, does_column_exist_in_db
+from scripts.artifacts.storagePathViews import unique_files
 
-def get_contacts(files_found, report_folder, seeker, wrap_text):
+@artifact_processor
+def contacts(context):
+    files_found = unique_files(context)
+    seeker = context.get_seeker()
 
     source_file = ''
+    data_list = []
+    
     for file_found in files_found:
         
         file_name = str(file_found)
@@ -15,12 +48,12 @@ def get_contacts(files_found, report_folder, seeker, wrap_text):
            not os.path.basename(file_name) == 'contacts.db': # skip -journal and other files
             continue
 
-        source_file = file_found.replace(seeker.directory, '')
+        source_file = file_found.replace(seeker.data_folder, '')
 
         db = open_sqlite_db_readonly(file_name)
         cursor = db.cursor()
         try:
-            if does_column_exist_in_db(db, 'contacts', 'name_raw_contact_id'):
+            if does_column_exist_in_db(file_name, 'contacts', 'name_raw_contact_id'):
                 cursor.execute('''
                     SELECT mimetype, data1, name_raw_contact.display_name AS display_name
                       FROM raw_contacts JOIN contacts ON (raw_contacts.contact_id=contacts._id)
@@ -40,39 +73,22 @@ def get_contacts(files_found, report_folder, seeker, wrap_text):
 
             all_rows = cursor.fetchall()
             usageentries = len(all_rows)
+            if usageentries > 0:
+                for row in all_rows:
+                    phoneNumber = None
+                    emailAddr = None
+                    if row[0] == "vnd.android.cursor.item/phone_v2":
+                        phoneNumber = row[1]                                      
+                    else:
+                        emailAddr = row[1]
+
+                    data_list.append((row[0], row[1], row[2], phoneNumber, emailAddr, file_name))
+            
         except Exception as e:
             print (e)
             usageentries = 0
             
-        if usageentries > 0:
-            report = ArtifactHtmlReport('Contacts')
-            report.start_artifact_report(report_folder, 'Contacts')
-            report.add_script()
-            data_headers = ('mimetype','data1', 'display_name', 'phone_number', 'email address') # Don't remove the comma, that is required to make this a tuple as there is only 1 element
-            data_list = []
-            for row in all_rows:
-                phoneNumber = None
-                emailAddr = None
-                if row[0] == "vnd.android.cursor.item/phone_v2":
-                    phoneNumber = row[1]                                      
-                else:
-                    emailAddr = row[1]
-
-                data_list.append((row[0], row[1], row[2], phoneNumber, emailAddr))
-
-            report.write_artifact_data_table(data_headers, data_list, file_found)
-            report.end_artifact_report()
-            
-            tsvname = f'Contacts'
-            tsv(report_folder, data_headers, data_list, tsvname, source_file)
-
-            tlactivity = f'Contaccts'
-            timeline(report_folder, tlactivity, data_list, data_headers)
-            
-        else:
-            logfunc('No Contacts found')
-            
-
-        db.close
+        db.close()
     
-    return
+    data_headers = ('Mimetype','Data 1', 'Display Name', 'Phone Number', 'Email Address', 'Source File') # Don't remove the comma, that is required to make this a tuple as there is only 1 element
+    return data_headers, data_list, 'See source file(s) below'
